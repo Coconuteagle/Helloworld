@@ -107,6 +107,25 @@ export const TRACK_PRESETS = [
   },
 ];
 
+const DEFAULT_TRACK_KEY = 'grand-circuit';
+
+export function createSessionSettings(overrides = {}) {
+  const requestedTrackKey = overrides.trackKey;
+  const validTrackKey = TRACK_PRESETS.some((preset) => preset.key === requestedTrackKey)
+    ? requestedTrackKey
+    : DEFAULT_TRACK_KEY;
+
+  return {
+    trackKey: validTrackKey,
+    laps: clamp(overrides.laps ?? 3, 1, 10),
+    aiCount: clamp(overrides.aiCount ?? 3, 0, 7),
+  };
+}
+
+export function getBestLapStorageKey(trackKey) {
+  return `apex-sprint-lap-best:${trackKey}`;
+}
+
 function subtract(a, b) {
   return { x: a.x - b.x, y: a.y - b.y };
 }
@@ -190,10 +209,10 @@ function createGate(points, index, span) {
   };
 }
 
-export function createTrack(width, height, presetKey = 'grand-circuit') {
+export function createTrack(width, height, presetKey = DEFAULT_TRACK_KEY) {
   const preset =
     TRACK_PRESETS.find((candidate) => candidate.key === presetKey) ||
-    TRACK_PRESETS.find((candidate) => candidate.key === 'grand-circuit');
+    TRACK_PRESETS.find((candidate) => candidate.key === DEFAULT_TRACK_KEY);
   const points = preset.points.map(([x, y]) => ({ x: width * x, y: height * y }));
   const halfWidth = Math.min(width, height) * preset.widthScale;
   const segmentLengths = [];

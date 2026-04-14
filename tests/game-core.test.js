@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 
 import {
   advanceLapState,
+  createSessionSettings,
   createTrack,
   crossesGate,
   createInitialLapState,
   formatLapTime,
+  getBestLapStorageKey,
   getPointAtProgress,
   getTrackSample,
   normalizeWheelAngle,
@@ -166,4 +168,28 @@ test('updateBoostValue spends while active and recharges while idle without leav
     updateBoostValue(0.1, 1, { active: true, spendRate: 0.5, rechargeRate: 0.2, maxBoost: 1 }),
     0,
   );
+});
+
+test('createSessionSettings clamps laps and ai count while normalizing the selected track', () => {
+  assert.deepEqual(
+    createSessionSettings({ trackKey: 'technical-maze', laps: 12, aiCount: -3 }),
+    {
+      trackKey: 'technical-maze',
+      laps: 10,
+      aiCount: 0,
+    },
+  );
+
+  assert.deepEqual(
+    createSessionSettings({ trackKey: 'unknown', laps: 0, aiCount: 11 }),
+    {
+      trackKey: 'grand-circuit',
+      laps: 1,
+      aiCount: 7,
+    },
+  );
+});
+
+test('getBestLapStorageKey scopes persisted records by course key', () => {
+  assert.equal(getBestLapStorageKey('rookie-loop'), 'apex-sprint-lap-best:rookie-loop');
 });
