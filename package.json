@@ -1,0 +1,8 @@
+{
+  "name": "helloworld-racing-game",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}
