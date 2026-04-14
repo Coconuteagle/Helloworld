@@ -9,8 +9,11 @@ import {
   formatLapTime,
   getPointAtProgress,
   getTrackSample,
+  normalizeWheelAngle,
   normalizeSteeringInput,
   rankRaceEntries,
+  TRACK_PRESETS,
+  updateBoostValue,
   wrapProgress,
 } from '../game-core.js';
 
@@ -119,4 +122,48 @@ test('getPointAtProgress returns a stable point along the loop and wraps over on
 test('wrapProgress keeps loop progress inside the 0 to 1 range', () => {
   assert.equal(wrapProgress(1.25), 0.25);
   assert.equal(wrapProgress(-0.2), 0.8);
+});
+
+test('createTrack supports five named course presets including a winding technical maze', () => {
+  assert.equal(TRACK_PRESETS.length, 5);
+
+  const rookie = createTrack(1000, 700, 'rookie-loop');
+  const technical = createTrack(1000, 700, 'technical-maze');
+
+  assert.equal(rookie.key, 'rookie-loop');
+  assert.equal(technical.key, 'technical-maze');
+  assert.equal(technical.points.length > rookie.points.length, true);
+  assert.equal(technical.halfWidth < rookie.halfWidth, true);
+});
+
+test('createInitialLapState accepts variable lap counts for longer sessions', () => {
+  const lapState = createInitialLapState(8);
+
+  assert.equal(lapState.totalLaps, 8);
+  assert.equal(lapState.lap, 1);
+  assert.equal(lapState.finished, false);
+});
+
+test('normalizeWheelAngle clamps steering wheel rotation to a normalized steer range', () => {
+  const maxAngle = Math.PI * 0.55;
+
+  assert.equal(normalizeWheelAngle(0, maxAngle), 0);
+  assert.equal(normalizeWheelAngle(maxAngle / 2, maxAngle), 0.5);
+  assert.equal(normalizeWheelAngle(maxAngle * 2, maxAngle), 1);
+  assert.equal(normalizeWheelAngle(-maxAngle * 2, maxAngle), -1);
+});
+
+test('updateBoostValue spends while active and recharges while idle without leaving bounds', () => {
+  assert.equal(
+    updateBoostValue(1, 1, { active: true, spendRate: 0.65, rechargeRate: 0.2, maxBoost: 1 }),
+    0.35,
+  );
+  assert.equal(
+    updateBoostValue(0.35, 2, { active: false, spendRate: 0.65, rechargeRate: 0.4, maxBoost: 1 }),
+    1,
+  );
+  assert.equal(
+    updateBoostValue(0.1, 1, { active: true, spendRate: 0.5, rechargeRate: 0.2, maxBoost: 1 }),
+    0,
+  );
 });

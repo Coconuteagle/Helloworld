@@ -2,6 +2,111 @@ export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+export const TRACK_PRESETS = [
+  {
+    key: 'rookie-loop',
+    label: 'Rookie Loop',
+    widthScale: 0.092,
+    points: [
+      [0.5, 0.16],
+      [0.67, 0.2],
+      [0.81, 0.32],
+      [0.84, 0.49],
+      [0.76, 0.67],
+      [0.58, 0.79],
+      [0.39, 0.8],
+      [0.22, 0.68],
+      [0.15, 0.48],
+      [0.2, 0.27],
+    ],
+    gateIndices: [0, 2, 5, 7],
+  },
+  {
+    key: 'velocity-ring',
+    label: 'Velocity Ring',
+    widthScale: 0.096,
+    points: [
+      [0.49, 0.12],
+      [0.73, 0.16],
+      [0.86, 0.28],
+      [0.89, 0.48],
+      [0.82, 0.68],
+      [0.64, 0.82],
+      [0.39, 0.84],
+      [0.2, 0.74],
+      [0.12, 0.53],
+      [0.14, 0.3],
+      [0.28, 0.16],
+    ],
+    gateIndices: [0, 3, 6, 8],
+  },
+  {
+    key: 'grand-circuit',
+    label: 'Grand Circuit',
+    widthScale: 0.08,
+    points: [
+      [0.48, 0.13],
+      [0.69, 0.18],
+      [0.83, 0.32],
+      [0.86, 0.53],
+      [0.76, 0.74],
+      [0.56, 0.85],
+      [0.34, 0.82],
+      [0.17, 0.68],
+      [0.12, 0.46],
+      [0.19, 0.24],
+    ],
+    gateIndices: [0, 2, 5, 7],
+  },
+  {
+    key: 'marathon-bend',
+    label: 'Marathon Bend',
+    widthScale: 0.074,
+    points: [
+      [0.45, 0.1],
+      [0.67, 0.13],
+      [0.83, 0.21],
+      [0.9, 0.39],
+      [0.88, 0.6],
+      [0.78, 0.78],
+      [0.6, 0.88],
+      [0.38, 0.87],
+      [0.21, 0.77],
+      [0.11, 0.58],
+      [0.11, 0.35],
+      [0.22, 0.17],
+    ],
+    gateIndices: [0, 3, 6, 9],
+  },
+  {
+    key: 'technical-maze',
+    label: 'Technical Maze',
+    widthScale: 0.068,
+    points: [
+      [0.46, 0.11],
+      [0.59, 0.13],
+      [0.72, 0.18],
+      [0.82, 0.27],
+      [0.86, 0.39],
+      [0.81, 0.5],
+      [0.7, 0.56],
+      [0.63, 0.64],
+      [0.66, 0.76],
+      [0.59, 0.86],
+      [0.46, 0.84],
+      [0.36, 0.76],
+      [0.26, 0.8],
+      [0.16, 0.72],
+      [0.13, 0.6],
+      [0.18, 0.49],
+      [0.27, 0.42],
+      [0.24, 0.31],
+      [0.31, 0.2],
+    ],
+    gateIndices: [0, 5, 10, 15],
+  },
+];
+
 function subtract(a, b) {
   return { x: a.x - b.x, y: a.y - b.y };
 }
@@ -85,20 +190,12 @@ function createGate(points, index, span) {
   };
 }
 
-export function createTrack(width, height) {
-  const points = [
-    { x: width * 0.48, y: height * 0.13 },
-    { x: width * 0.69, y: height * 0.18 },
-    { x: width * 0.83, y: height * 0.32 },
-    { x: width * 0.86, y: height * 0.53 },
-    { x: width * 0.76, y: height * 0.74 },
-    { x: width * 0.56, y: height * 0.85 },
-    { x: width * 0.34, y: height * 0.82 },
-    { x: width * 0.17, y: height * 0.68 },
-    { x: width * 0.12, y: height * 0.46 },
-    { x: width * 0.19, y: height * 0.24 },
-  ];
-  const halfWidth = Math.min(width, height) * 0.08;
+export function createTrack(width, height, presetKey = 'grand-circuit') {
+  const preset =
+    TRACK_PRESETS.find((candidate) => candidate.key === presetKey) ||
+    TRACK_PRESETS.find((candidate) => candidate.key === 'grand-circuit');
+  const points = preset.points.map(([x, y]) => ({ x: width * x, y: height * y }));
+  const halfWidth = Math.min(width, height) * preset.widthScale;
   const segmentLengths = [];
   const cumulativeLengths = [0];
   let totalLength = 0;
@@ -112,15 +209,15 @@ export function createTrack(width, height) {
     cumulativeLengths.push(totalLength);
   }
 
-  const gateIndices = [0, 2, 5, 7];
-
   return {
+    key: preset.key,
+    label: preset.label,
     points,
     halfWidth,
     segmentLengths,
     cumulativeLengths,
     totalLength,
-    gates: gateIndices.map((index) => createGate(points, index, halfWidth * 1.35)),
+    gates: preset.gateIndices.map((index) => createGate(points, index, halfWidth * 1.35)),
   };
 }
 
@@ -255,6 +352,19 @@ export function advanceLapState(state, gateIndex, lapTimeMs, totalGates) {
 export function normalizeSteeringInput(deltaX, viewportWidth) {
   const referenceWidth = Math.max(72, viewportWidth * 0.2);
   return clamp(deltaX / referenceWidth, -1, 1);
+}
+
+export function normalizeWheelAngle(angle, maxAngle) {
+  return clamp(angle / maxAngle, -1, 1);
+}
+
+export function updateBoostValue(current, deltaSeconds, config) {
+  const { active, spendRate, rechargeRate, maxBoost } = config;
+  const nextValue = active
+    ? current - spendRate * deltaSeconds
+    : current + rechargeRate * deltaSeconds;
+
+  return clamp(nextValue, 0, maxBoost);
 }
 
 export function rankRaceEntries(entries) {
