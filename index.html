@@ -10,13 +10,17 @@
   <main class="shell">
     <header class="topbar">
       <div>
-        <p class="eyebrow">Mobile Time Attack</p>
+        <p class="eyebrow">Configurable Arcade Racer</p>
         <h1>Apex Sprint Lap</h1>
       </div>
-      <p class="topbar-copy">스와이프로 조향하고 세 랩 동안 최고 기록을 깎으세요.</p>
+      <p class="topbar-copy">코스를 고르고, AI와 랩 수를 조절한 뒤, 핸들과 액션 패드로 랩타임을 깎으세요.</p>
     </header>
 
     <section class="hud" aria-label="레이스 정보">
+      <article class="hud-card hud-card--wide">
+        <span class="hud-label">Track</span>
+        <strong id="trackValue" class="hud-value">Grand Circuit</strong>
+      </article>
       <article class="hud-card">
         <span class="hud-label">Lap</span>
         <strong id="lapValue" class="hud-value">1/3</strong>
@@ -33,25 +37,108 @@
         <span class="hud-label">Speed</span>
         <strong id="speedValue" class="hud-value">0 km/h</strong>
       </article>
+      <article class="hud-card hud-card--boost">
+        <span class="hud-label">Boost</span>
+        <div class="boost-meter" aria-hidden="true">
+          <span id="boostFill" class="boost-fill"></span>
+        </div>
+        <strong id="boostValue" class="hud-value hud-value--compact">100%</strong>
+      </article>
+      <button id="pauseButton" class="hud-action" type="button">Pause</button>
     </section>
 
     <section class="track-panel">
       <div class="track-frame">
         <canvas id="raceCanvas" aria-label="탑다운 레이싱 게임"></canvas>
 
+        <div class="control-layer" aria-label="가상 조작 패드">
+          <div class="wheel-cluster">
+            <div class="control-label">Steering</div>
+            <div id="wheelControl" class="wheel-control" role="slider" aria-label="스티어링 휠" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0">
+              <div class="wheel-ring"></div>
+              <div id="wheelFace" class="wheel-face">
+                <span class="wheel-spoke wheel-spoke--top"></span>
+                <span class="wheel-spoke wheel-spoke--left"></span>
+                <span class="wheel-spoke wheel-spoke--right"></span>
+                <span class="wheel-core"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="action-cluster">
+            <button id="boostButton" class="action-pad action-pad--boost" type="button">Boost</button>
+            <button id="brakeButton" class="action-pad action-pad--brake" type="button">Brake</button>
+            <button id="driftButton" class="action-pad action-pad--drift" type="button">Drift</button>
+          </div>
+        </div>
+
         <div id="startOverlay" class="overlay">
-          <div class="overlay-card">
-            <p class="eyebrow">Clean Sport Circuit</p>
-            <h2>스와이프로 서킷을 지배하세요</h2>
-            <p class="overlay-copy">
-              자동 가속으로 달리고, 좌우 드래그로 조향합니다. 체크포인트를 순서대로 통과해야 랩이 인정됩니다.
-            </p>
+          <div class="overlay-card overlay-card--settings">
+            <p class="eyebrow">Race Hub</p>
+            <h2>세션 세팅</h2>
+            <p class="overlay-copy">코스, 랩, AI 수를 정하고 레이스를 시작하세요. 코스별 최고 기록은 별도로 저장됩니다.</p>
+
+            <section class="settings-section">
+              <div class="settings-heading">
+                <strong>Course Select</strong>
+                <span>5개 코스</span>
+              </div>
+              <div id="startTrackOptions" class="track-options" role="group" aria-label="코스 선택"></div>
+            </section>
+
+            <section class="settings-section settings-grid">
+              <label class="range-setting" for="startLapInput">
+                <span class="range-label">Laps</span>
+                <strong id="startLapOutput" class="range-value">3</strong>
+                <input id="startLapInput" type="range" min="1" max="10" value="3" />
+              </label>
+              <label class="range-setting" for="startAiInput">
+                <span class="range-label">AI Rivals</span>
+                <strong id="startAiOutput" class="range-value">3</strong>
+                <input id="startAiInput" type="range" min="0" max="7" value="3" />
+              </label>
+            </section>
+
             <ul class="feature-list">
-              <li>3랩 타임어택</li>
-              <li>AI 라이벌 3대</li>
-              <li>최고 기록 자동 저장</li>
+              <li>좌측 핸들, 우측 브레이크 / 부스트 / 드리프트</li>
+              <li>코스별 최고 기록 저장</li>
+              <li>일시정지 중 세팅 변경 후 재시작 가능</li>
             </ul>
             <button id="startButton" class="action-button" type="button">Start Session</button>
+          </div>
+        </div>
+
+        <div id="pauseOverlay" class="overlay hidden">
+          <div class="overlay-card overlay-card--settings overlay-card--compact">
+            <p class="eyebrow">Paused</p>
+            <h2>세션 조정</h2>
+            <p class="overlay-copy">현재 레이스는 유지한 채 확인하거나, 새 세팅을 적용해 바로 다시 시작할 수 있습니다.</p>
+
+            <section class="settings-section">
+              <div class="settings-heading">
+                <strong>Track</strong>
+                <span>Apply & Restart로 반영</span>
+              </div>
+              <div id="pauseTrackOptions" class="track-options" role="group" aria-label="일시정지 코스 선택"></div>
+            </section>
+
+            <section class="settings-section settings-grid">
+              <label class="range-setting" for="pauseLapInput">
+                <span class="range-label">Laps</span>
+                <strong id="pauseLapOutput" class="range-value">3</strong>
+                <input id="pauseLapInput" type="range" min="1" max="10" value="3" />
+              </label>
+              <label class="range-setting" for="pauseAiInput">
+                <span class="range-label">AI Rivals</span>
+                <strong id="pauseAiOutput" class="range-value">3</strong>
+                <input id="pauseAiInput" type="range" min="0" max="7" value="3" />
+              </label>
+            </section>
+
+            <div class="button-row">
+              <button id="resumeButton" class="ghost-button" type="button">Resume</button>
+              <button id="applyRestartButton" class="action-button" type="button">Apply & Restart</button>
+            </div>
           </div>
         </div>
 
@@ -60,6 +147,10 @@
             <p class="eyebrow">Session Complete</p>
             <h2 id="resultTitle">레이스 종료</h2>
             <dl class="results">
+              <div class="result-row">
+                <dt>Track</dt>
+                <dd id="resultTrack">Grand Circuit</dd>
+              </div>
               <div class="result-row">
                 <dt>Best Lap</dt>
                 <dd id="resultBest">--:--.--</dd>
@@ -73,14 +164,17 @@
                 <dd id="resultPosition">1 / 4</dd>
               </div>
             </dl>
-            <button id="restartButton" class="action-button" type="button">Race Again</button>
+            <div class="button-row">
+              <button id="backToSetupButton" class="ghost-button" type="button">Back To Setup</button>
+              <button id="restartButton" class="action-button" type="button">Race Again</button>
+            </div>
           </div>
         </div>
       </div>
 
       <div class="supporting-copy">
-        <p>모바일: 화면을 누른 채 좌우로 드래그</p>
-        <p>데스크톱: 방향키 또는 A / D</p>
+        <p>모바일: 좌측 핸들을 돌리고 우측 버튼을 누르세요.</p>
+        <p>데스크톱: 방향키 / A D, 브레이크 Space, 드리프트 Shift, 부스트 B</p>
       </div>
     </section>
   </main>

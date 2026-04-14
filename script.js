@@ -2,70 +2,176 @@ import {
   advanceLapState,
   clamp,
   createInitialLapState,
+  createSessionSettings,
   createTrack,
   crossesGate,
   formatLapTime,
+  getBestLapStorageKey,
   getPointAtProgress,
   getTrackSample,
-  normalizeSteeringInput,
+  normalizeWheelAngle,
   rankRaceEntries,
+  TRACK_PRESETS,
+  updateBoostValue,
 } from './game-core.js';
 
-const TOTAL_LAPS = 3;
-const RIVAL_COUNT = 3;
-const STORAGE_KEY = 'apex-sprint-lap-best';
+const DEFAULT_SETTINGS = createSessionSettings();
+const WHEEL_MAX_ANGLE = Math.PI * 0.58;
+const BOOST_SPEND_RATE = 0.52;
+const BOOST_RECHARGE_RATE = 0.22;
+
+const TRACK_DETAILS = {
+  'rookie-loop': {
+    summary: '넓고 부드러운 입문용 서킷',
+    fieldTop: '#eef6ff',
+    fieldBottom: '#dce9f7',
+    accent: '#3b82f6',
+    speedFactor: 1.02,
+    aiPace: 0.92,
+  },
+  'velocity-ring': {
+    summary: '고속 코너 위주의 스피드형',
+    fieldTop: '#f2fbff',
+    fieldBottom: '#d8edf5',
+    accent: '#0ea5e9',
+    speedFactor: 1.06,
+    aiPace: 0.98,
+  },
+  'grand-circuit': {
+    summary: '밸런스 중심의 표준 코스',
+    fieldTop: '#f8fbff',
+    fieldBottom: '#dce9f6',
+    accent: '#1864ab',
+    speedFactor: 1,
+    aiPace: 0.96,
+  },
+  'marathon-bend': {
+    summary: '길고 리듬이 큰 장거리형',
+    fieldTop: '#f7fbf7',
+    fieldBottom: '#ddebdc',
+    accent: '#1b9c62',
+    speedFactor: 0.98,
+    aiPace: 0.95,
+  },
+  'technical-maze': {
+    summary: '더 구불구불한 테크니컬 코스',
+    fieldTop: '#fff8f1',
+    fieldBottom: '#f0e3d6',
+    accent: '#f76707',
+    speedFactor: 0.93,
+    aiPace: 0.9,
+  },
+};
 
 const canvas = document.querySelector('#raceCanvas');
 const context = canvas.getContext('2d');
 const stageFrame = document.querySelector('.track-frame');
+
 const startOverlay = document.querySelector('#startOverlay');
+const pauseOverlay = document.querySelector('#pauseOverlay');
 const resultOverlay = document.querySelector('#resultOverlay');
+
 const startButton = document.querySelector('#startButton');
 const restartButton = document.querySelector('#restartButton');
+const backToSetupButton = document.querySelector('#backToSetupButton');
+const resumeButton = document.querySelector('#resumeButton');
+const applyRestartButton = document.querySelector('#applyRestartButton');
+const pauseButton = document.querySelector('#pauseButton');
 
+const wheelControl = document.querySelector('#wheelControl');
+const wheelFace = document.querySelector('#wheelFace');
+const brakeButton = document.querySelector('#brakeButton');
+const boostButton = document.querySelector('#boostButton');
+const driftButton = document.querySelector('#driftButton');
+
+const trackValue = document.querySelector('#trackValue');
 const lapValue = document.querySelector('#lapValue');
 const bestValue = document.querySelector('#bestValue');
 const currentValue = document.querySelector('#currentValue');
 const speedValue = document.querySelector('#speedValue');
+const boostFill = document.querySelector('#boostFill');
+const boostValue = document.querySelector('#boostValue');
+
+const resultTrack = document.querySelector('#resultTrack');
 const resultBest = document.querySelector('#resultBest');
 const resultTotal = document.querySelector('#resultTotal');
 const resultPosition = document.querySelector('#resultPosition');
 
+const settingsPanels = [
+  {
+    trackOptions: document.querySelector('#startTrackOptions'),
+    lapInput: document.querySelector('#startLapInput'),
+    lapOutput: document.querySelector('#startLapOutput'),
+    aiInput: document.querySelector('#startAiInput'),
+    aiOutput: document.querySelector('#startAiOutput'),
+  },
+  {
+    trackOptions: document.querySelector('#pauseTrackOptions'),
+    lapInput: document.querySelector('#pauseLapInput'),
+    lapOutput: document.querySelector('#pauseLapOutput'),
+    aiInput: document.querySelector('#pauseAiInput'),
+    aiOutput: document.querySelector('#pauseAiOutput'),
+  },
+];
+
 const state = {
   status: 'ready',
   viewport: { width: 0, height: 0 },
+  settings: { ...DEFAULT_SETTINGS },
+  draftSettings: { ...DEFAULT_SETTINGS },
   track: null,
   player: null,
   rivals: [],
-  lapState: createInitialLapState(TOTAL_LAPS),
+  lapState: createInitialLapState(DEFAULT_SETTINGS.laps),
   lastFrameAt: 0,
   sessionStartedAt: 0,
   lapStartedAt: 0,
-  storedBestLapMs: readStoredBestLap(),
-  pointer: {
-    active: false,
-    startX: 0,
-    currentX: 0,
+  storedBestLapMs: null,
+  playerPosition: 1,
+  boost: {
+    value: 1,
+    max: 1,
+  },
+  controls: {
+    wheel: {
+      active: false,
+      pointerId: null,
+      angle: 0,
+      steer: 0,
+    },
+    brake: false,
+    boost: false,
+    drift: false,
   },
   keyboard: {
     left: false,
     right: false,
+    brake: false,
+    boost: false,
+    drift: false,
   },
-  playerPosition: 1,
 };
 
-function readStoredBestLap() {
+function getTrackDetail(trackKey) {
+  return TRACK_DETAILS[trackKey] || TRACK_DETAILS['grand-circuit'];
+}
+
+function cloneSettings(settings) {
+  return createSessionSettings({ ...settings });
+}
+
+function readStoredBestLap(trackKey) {
   try {
-    const stored = Number(localStorage.getItem(STORAGE_KEY));
+    const stored = Number(localStorage.getItem(getBestLapStorageKey(trackKey)));
     return Number.isFinite(stored) && stored > 0 ? stored : null;
   } catch {
     return null;
   }
 }
 
-function writeStoredBestLap(value) {
+function writeStoredBestLap(trackKey, value) {
   try {
-    localStorage.setItem(STORAGE_KEY, String(Math.floor(value)));
+    localStorage.setItem(getBestLapStorageKey(trackKey), String(Math.floor(value)));
   } catch {
     // Ignore storage failures and keep the session playable.
   }
@@ -93,6 +199,80 @@ function shortestAngleDelta(from, to) {
   return delta - Math.PI;
 }
 
+function setStatus(nextStatus) {
+  state.status = nextStatus;
+  startOverlay.classList.toggle('hidden', nextStatus !== 'ready');
+  pauseOverlay.classList.toggle('hidden', nextStatus !== 'paused');
+  resultOverlay.classList.toggle('hidden', nextStatus !== 'finished');
+  pauseButton.disabled = nextStatus !== 'running';
+
+  if (nextStatus !== 'running') {
+    resetInputState();
+  }
+}
+
+function renderWheel() {
+  wheelFace.style.transform = `rotate(${state.controls.wheel.angle}rad)`;
+  wheelControl.setAttribute('aria-valuenow', String(Math.round(state.controls.wheel.steer * 100)));
+}
+
+function renderBoostMeter() {
+  boostFill.style.transform = `scaleX(${state.boost.value})`;
+  boostValue.textContent = `${Math.round(state.boost.value * 100)}%`;
+}
+
+function renderSettingsPanels() {
+  for (const panel of settingsPanels) {
+    panel.lapInput.value = String(state.draftSettings.laps);
+    panel.lapOutput.textContent = String(state.draftSettings.laps);
+    panel.aiInput.value = String(state.draftSettings.aiCount);
+    panel.aiOutput.textContent = String(state.draftSettings.aiCount);
+
+    panel.trackOptions.querySelectorAll('[data-track-key]').forEach((button) => {
+      button.classList.toggle('is-active', button.dataset.trackKey === state.draftSettings.trackKey);
+    });
+  }
+}
+
+function updateDraftSettings(partial) {
+  state.draftSettings = createSessionSettings({
+    ...state.draftSettings,
+    ...partial,
+  });
+  renderSettingsPanels();
+}
+
+function buildTrackSelectors() {
+  for (const panel of settingsPanels) {
+    panel.trackOptions.innerHTML = '';
+
+    for (const preset of TRACK_PRESETS) {
+      const detail = getTrackDetail(preset.key);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'track-chip';
+      button.dataset.trackKey = preset.key;
+      button.innerHTML = `<strong>${preset.label}</strong><small>${detail.summary}</small>`;
+      button.addEventListener('click', () => {
+        updateDraftSettings({ trackKey: preset.key });
+      });
+      panel.trackOptions.append(button);
+    }
+
+    panel.lapInput.addEventListener('input', () => {
+      updateDraftSettings({ laps: Number(panel.lapInput.value) });
+    });
+
+    panel.aiInput.addEventListener('input', () => {
+      updateDraftSettings({ aiCount: Number(panel.aiInput.value) });
+    });
+  }
+}
+
+function refreshStoredBest() {
+  state.storedBestLapMs = readStoredBestLap(state.settings.trackKey);
+}
+
 function positionOnTrack(progress, laneOffset) {
   const sample = getPointAtProgress(state.track, progress);
 
@@ -117,14 +297,25 @@ function createCar(config) {
     completedLaps: 0,
     progress: (config.progress % 1 + 1) % 1,
     targetSpeedScale: 1,
+    turnFactor: 1,
+    recoveryFactor: 1,
+    steerPenaltyScale: 0.14,
     onTrack: true,
   };
 }
 
+function createLaneOffsets(count, laneStep) {
+  const pattern = [0, -1, 1, -2, 2, -3, 3];
+
+  return Array.from({ length: count }, (_, index) => (pattern[index] || 0) * laneStep);
+}
+
 function resetRaceCars() {
   const scale = Math.min(state.viewport.width, state.viewport.height);
-  const lane = state.track.halfWidth * 0.34;
-  const baseMaxSpeed = scale * 0.34;
+  const laneOffsets = createLaneOffsets(state.settings.aiCount, state.track.halfWidth * 0.21);
+  const tuning = getTrackDetail(state.settings.trackKey);
+  const baseMaxSpeed = scale * 0.34 * tuning.speedFactor;
+  const rivalColors = ['#1b9c62', '#d94841', '#f59f00', '#7c3aed', '#0891b2', '#c2410c', '#0f766e'];
 
   state.player = createCar({
     id: 'player',
@@ -134,29 +325,27 @@ function resetRaceCars() {
     laneOffset: 0,
     maxSpeed: baseMaxSpeed,
     acceleration: scale * 0.42,
-    turnRate: 2.8,
+    turnRate: 2.85,
     size: { length: scale * 0.06, width: scale * 0.033 },
   });
 
-  state.rivals = Array.from({ length: RIVAL_COUNT }, (_, index) => {
-    const laneOffset = [-lane, lane, 0][index];
-
+  state.rivals = Array.from({ length: state.settings.aiCount }, (_, index) => {
     return createCar({
       id: `ai-${index + 1}`,
-      color: ['#1b9c62', '#d94841', '#f59f00'][index],
+      color: rivalColors[index % rivalColors.length],
       accent: '#ffffff',
-      progress: 0.02 - (index + 1) * 0.035,
-      laneOffset,
-      maxSpeed: baseMaxSpeed * (0.93 + index * 0.02),
+      progress: 0.02 - (index + 1) * 0.028,
+      laneOffset: laneOffsets[index],
+      maxSpeed: baseMaxSpeed * (tuning.aiPace + index * 0.012),
       acceleration: scale * 0.36,
-      turnRate: 2.3,
+      turnRate: 2.2,
       size: { length: scale * 0.055, width: scale * 0.03 },
     });
   });
 }
 
 function rebuildTrack() {
-  state.track = createTrack(state.viewport.width, state.viewport.height);
+  state.track = createTrack(state.viewport.width, state.viewport.height, state.settings.trackKey);
 
   if (!state.player) {
     return;
@@ -187,31 +376,9 @@ function resizeCanvas() {
   drawScene(performance.now());
 }
 
-function startRace() {
-  state.status = 'running';
-  state.lastFrameAt = 0;
-  state.sessionStartedAt = performance.now();
-  state.lapStartedAt = state.sessionStartedAt;
-  state.lapState = createInitialLapState(TOTAL_LAPS);
-  state.playerPosition = 1;
-  state.pointer.active = false;
-  state.pointer.startX = 0;
-  state.pointer.currentX = 0;
-  resetRaceCars();
-  startOverlay.classList.add('hidden');
-  resultOverlay.classList.add('hidden');
-  updateHud(state.sessionStartedAt);
-}
-
-function finishRace(now) {
-  state.status = 'finished';
-  const order = getRaceOrder();
-  state.playerPosition = order.findIndex((entry) => entry.id === 'player') + 1;
-
-  resultBest.textContent = formatLapTime(state.lapState.bestLapMs || state.storedBestLapMs);
-  resultTotal.textContent = formatLapTime(now - state.sessionStartedAt);
-  resultPosition.textContent = `${state.playerPosition} / ${RIVAL_COUNT + 1}`;
-  resultOverlay.classList.remove('hidden');
+function syncHudStatic() {
+  trackValue.textContent = state.track?.label || TRACK_PRESETS.find((preset) => preset.key === state.settings.trackKey)?.label || 'Grand Circuit';
+  renderBoostMeter();
 }
 
 function updateHud(now) {
@@ -219,10 +386,79 @@ function updateHud(now) {
     return;
   }
 
-  lapValue.textContent = `${Math.min(state.lapState.lap, TOTAL_LAPS)}/${TOTAL_LAPS}`;
+  lapValue.textContent = `${Math.min(state.lapState.lap, state.settings.laps)}/${state.settings.laps}`;
   bestValue.textContent = formatLapTime(state.lapState.bestLapMs || state.storedBestLapMs);
   currentValue.textContent = formatLapTime(now - state.lapStartedAt);
   speedValue.textContent = `${Math.round(state.player.speed * 0.64)} km/h`;
+  syncHudStatic();
+}
+
+function applyCurrentSettings() {
+  state.settings = cloneSettings(state.draftSettings);
+  state.lapState = createInitialLapState(state.settings.laps);
+  refreshStoredBest();
+  rebuildTrack();
+  syncHudStatic();
+}
+
+function resetInputState() {
+  state.controls.wheel.active = false;
+  state.controls.wheel.pointerId = null;
+  state.controls.wheel.angle = 0;
+  state.controls.wheel.steer = 0;
+  state.controls.brake = false;
+  state.controls.boost = false;
+  state.controls.drift = false;
+  renderWheel();
+  [brakeButton, boostButton, driftButton].forEach((button) => button.classList.remove('is-active'));
+}
+
+function startRace() {
+  applyCurrentSettings();
+  state.lastFrameAt = 0;
+  state.sessionStartedAt = performance.now();
+  state.lapStartedAt = state.sessionStartedAt;
+  state.lapState = createInitialLapState(state.settings.laps);
+  state.playerPosition = 1;
+  state.boost.value = 1;
+  resetRaceCars();
+  setStatus('running');
+  updateHud(state.sessionStartedAt);
+}
+
+function openPause() {
+  if (state.status !== 'running') {
+    return;
+  }
+
+  state.draftSettings = cloneSettings(state.settings);
+  renderSettingsPanels();
+  setStatus('paused');
+}
+
+function resumeRace() {
+  if (state.status !== 'paused') {
+    return;
+  }
+
+  state.lastFrameAt = 0;
+  setStatus('running');
+}
+
+function showSetup() {
+  state.draftSettings = cloneSettings(state.settings);
+  renderSettingsPanels();
+  setStatus('ready');
+}
+
+function finishRace(now) {
+  const order = getRaceOrder();
+  state.playerPosition = order.findIndex((entry) => entry.id === 'player') + 1;
+  resultTrack.textContent = state.track.label;
+  resultBest.textContent = formatLapTime(state.lapState.bestLapMs || state.storedBestLapMs);
+  resultTotal.textContent = formatLapTime(now - state.sessionStartedAt);
+  resultPosition.textContent = `${state.playerPosition} / ${state.settings.aiCount + 1}`;
+  setStatus('finished');
 }
 
 function updateCarLapProgress(car, nextProgress) {
@@ -245,15 +481,15 @@ function updatePhysics(car, delta) {
     targetSpeed *= 0.52;
   }
 
-  targetSpeed *= clamp(1 - Math.abs(car.steering) * 0.14 - alignmentPenalty * 0.08, 0.55, 1);
+  targetSpeed *= clamp(1 - Math.abs(car.steering) * car.steerPenaltyScale - alignmentPenalty * 0.08, 0.52, 1);
 
   const acceleration = car.acceleration * (trackSample.onTrack ? 1 : 1.5);
   car.speed = approach(car.speed, targetSpeed, acceleration * delta);
 
-  car.heading += car.steering * car.turnRate * (0.6 + car.speed / car.maxSpeed) * delta;
+  car.heading += car.steering * car.turnRate * car.turnFactor * (0.6 + car.speed / car.maxSpeed) * delta;
 
   if (!trackSample.onTrack) {
-    car.heading -= shortestAngleDelta(trackHeading, car.heading) * delta * 1.25;
+    car.heading -= shortestAngleDelta(trackHeading, car.heading) * delta * 1.25 * car.recoveryFactor;
   }
 
   car.previousPosition.x = car.position.x;
@@ -272,23 +508,69 @@ function updatePhysics(car, delta) {
   }
 }
 
-function getPlayerInput() {
-  if (state.pointer.active) {
-    return normalizeSteeringInput(
-      state.pointer.currentX - state.pointer.startX,
-      state.viewport.width,
-    );
-  }
-
+function getKeyboardSteer() {
   if (state.keyboard.left && !state.keyboard.right) return -1;
   if (state.keyboard.right && !state.keyboard.left) return 1;
   return 0;
 }
 
+function getPlayerInput() {
+  if (state.controls.wheel.active || Math.abs(state.controls.wheel.steer) > 0.01) {
+    return state.controls.wheel.steer;
+  }
+
+  return getKeyboardSteer();
+}
+
+function isBrakeActive() {
+  return state.controls.brake || state.keyboard.brake;
+}
+
+function isBoostActive() {
+  return (state.controls.boost || state.keyboard.boost) && state.boost.value > 0.02;
+}
+
+function isDriftActive() {
+  return state.controls.drift || state.keyboard.drift;
+}
+
 function updatePlayer(delta, now) {
+  const braking = isBrakeActive();
+  const boosting = isBoostActive();
+  const drifting = isDriftActive() && state.player.speed > state.player.maxSpeed * 0.42;
+
+  state.boost.value = updateBoostValue(state.boost.value, delta, {
+    active: boosting,
+    spendRate: BOOST_SPEND_RATE,
+    rechargeRate: BOOST_RECHARGE_RATE,
+    maxBoost: state.boost.max,
+  });
+
   state.player.desiredSteering = getPlayerInput();
   state.player.targetSpeedScale = 1;
+  state.player.turnFactor = 1;
+  state.player.recoveryFactor = 1;
+  state.player.steerPenaltyScale = 0.14;
+
+  if (braking) {
+    state.player.targetSpeedScale *= 0.46;
+    state.player.recoveryFactor = 1.45;
+    state.player.turnFactor = 0.92;
+  }
+
+  if (boosting) {
+    state.player.targetSpeedScale *= 1.26;
+  }
+
+  if (drifting) {
+    state.player.targetSpeedScale *= 0.95;
+    state.player.turnFactor = 1.42;
+    state.player.recoveryFactor = 0.72;
+    state.player.steerPenaltyScale = 0.06;
+  }
+
   updatePhysics(state.player, delta);
+  renderBoostMeter();
 
   for (let gateIndex = 0; gateIndex < state.track.gates.length; gateIndex += 1) {
     const gate = state.track.gates[gateIndex];
@@ -309,7 +591,7 @@ function updatePlayer(delta, now) {
     if (state.lapState.completedLaps !== previousLapCount) {
       if (state.storedBestLapMs == null || lapDuration < state.storedBestLapMs) {
         state.storedBestLapMs = lapDuration;
-        writeStoredBestLap(lapDuration);
+        writeStoredBestLap(state.settings.trackKey, lapDuration);
       }
 
       state.lapStartedAt = now;
@@ -324,6 +606,8 @@ function updatePlayer(delta, now) {
 }
 
 function updateRivals(delta) {
+  const tuning = getTrackDetail(state.settings.trackKey);
+
   for (let index = 0; index < state.rivals.length; index += 1) {
     const rival = state.rivals[index];
     const targetSample = getPointAtProgress(state.track, rival.progress + 0.028);
@@ -341,7 +625,10 @@ function updateRivals(delta) {
     const targetHeading = angleBetween(target.x - rival.position.x, target.y - rival.position.y);
 
     rival.desiredSteering = clamp(shortestAngleDelta(rival.heading, targetHeading) * 1.6, -1, 1);
-    rival.targetSpeedScale = clamp(1 - curveDemand * 0.55, 0.62, 0.98 + index * 0.02);
+    rival.targetSpeedScale = clamp(tuning.aiPace + 0.08 - curveDemand * 0.55, 0.58, 1.04);
+    rival.turnFactor = 1;
+    rival.recoveryFactor = 1;
+    rival.steerPenaltyScale = 0.12;
 
     updatePhysics(rival, delta);
   }
@@ -394,6 +681,11 @@ function getRaceOrder() {
 
 function updateRace(delta, now) {
   updatePlayer(delta, now);
+
+  if (state.status !== 'running') {
+    return;
+  }
+
   updateRivals(delta);
   handleCollisions();
   const order = getRaceOrder();
@@ -427,21 +719,23 @@ function traceTrackPath() {
 }
 
 function drawTrackSurface() {
+  const detail = getTrackDetail(state.track.key);
+
   context.clearRect(0, 0, state.viewport.width, state.viewport.height);
 
   const fieldGradient = context.createLinearGradient(0, 0, 0, state.viewport.height);
-  fieldGradient.addColorStop(0, '#e6f0fa');
-  fieldGradient.addColorStop(1, '#d3e4f2');
+  fieldGradient.addColorStop(0, detail.fieldTop);
+  fieldGradient.addColorStop(1, detail.fieldBottom);
   context.fillStyle = fieldGradient;
   context.fillRect(0, 0, state.viewport.width, state.viewport.height);
 
-  context.fillStyle = 'rgba(24, 100, 171, 0.06)';
-  for (let index = 0; index < 7; index += 1) {
+  context.fillStyle = `${detail.accent}12`;
+  for (let index = 0; index < 8; index += 1) {
     context.beginPath();
     context.arc(
-      state.viewport.width * (0.15 + index * 0.12),
-      state.viewport.height * (0.18 + (index % 2) * 0.18),
-      state.track.halfWidth * (0.45 + (index % 3) * 0.08),
+      state.viewport.width * (0.14 + index * 0.11),
+      state.viewport.height * (0.16 + (index % 3) * 0.17),
+      state.track.halfWidth * (0.4 + (index % 4) * 0.08),
       0,
       Math.PI * 2,
     );
@@ -453,22 +747,22 @@ function drawTrackSurface() {
   context.lineJoin = 'round';
 
   traceTrackPath();
-  context.strokeStyle = '#c9d5e1';
-  context.lineWidth = state.track.halfWidth * 2.72;
+  context.strokeStyle = '#dbe4ec';
+  context.lineWidth = state.track.halfWidth * 2.74;
   context.stroke();
 
   traceTrackPath();
-  context.strokeStyle = '#37424d';
+  context.strokeStyle = '#3a4651';
   context.lineWidth = state.track.halfWidth * 2.18;
   context.stroke();
 
   traceTrackPath();
-  context.strokeStyle = '#f8fbff';
+  context.strokeStyle = '#f9fbfe';
   context.lineWidth = state.track.halfWidth * 2.04;
   context.stroke();
 
   traceTrackPath();
-  context.strokeStyle = '#313e49';
+  context.strokeStyle = '#2f3b46';
   context.lineWidth = state.track.halfWidth * 1.9;
   context.stroke();
 
@@ -480,7 +774,7 @@ function drawTrackSurface() {
   context.setLineDash([]);
 
   traceTrackPath();
-  context.strokeStyle = '#d94841';
+  context.strokeStyle = detail.accent;
   context.lineWidth = 6;
   context.stroke();
 
@@ -565,34 +859,13 @@ function drawRaceMeta(now) {
   context.save();
   context.fillStyle = 'rgba(16, 35, 58, 0.76)';
   context.font = '600 16px "Space Grotesk", "SUIT", sans-serif';
-  context.fillText(`POS ${state.playerPosition} / ${RIVAL_COUNT + 1}`, 26, state.viewport.height - 24);
-
-  if (state.pointer.active) {
-    const steer = normalizeSteeringInput(
-      state.pointer.currentX - state.pointer.startX,
-      state.viewport.width,
-    );
-    context.beginPath();
-    context.arc(state.pointer.startX, state.viewport.height - 70, 28, 0, Math.PI * 2);
-    context.fillStyle = 'rgba(255, 255, 255, 0.26)';
-    context.fill();
-
-    context.beginPath();
-    context.arc(
-      state.pointer.startX + steer * 36,
-      state.viewport.height - 70,
-      18,
-      0,
-      Math.PI * 2,
-    );
-    context.fillStyle = 'rgba(24, 100, 171, 0.9)';
-    context.fill();
-  }
+  context.fillText(`POS ${state.playerPosition} / ${state.settings.aiCount + 1}`, 26, state.viewport.height - 28);
 
   if (state.status === 'running') {
     context.fillStyle = 'rgba(16, 35, 58, 0.58)';
     context.font = '500 14px "Space Grotesk", "SUIT", sans-serif';
     context.fillText(`SESSION ${formatLapTime(now - state.sessionStartedAt)}`, 26, 28);
+    context.fillText(state.track.label, state.viewport.width - 170, 28);
   }
 
   context.restore();
@@ -632,45 +905,101 @@ function tick(now) {
   window.requestAnimationFrame(tick);
 }
 
-function updatePointer(event) {
-  state.pointer.currentX = event.clientX - stageFrame.getBoundingClientRect().left;
+function updateWheelFromPointer(event) {
+  const rect = wheelControl.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  const rawAngle = Math.atan2(event.clientY - centerY, event.clientX - centerX) + Math.PI / 2;
+  state.controls.wheel.angle = clamp(rawAngle, -WHEEL_MAX_ANGLE, WHEEL_MAX_ANGLE);
+  state.controls.wheel.steer = normalizeWheelAngle(state.controls.wheel.angle, WHEEL_MAX_ANGLE);
+  renderWheel();
 }
 
-startButton.addEventListener('click', startRace);
-restartButton.addEventListener('click', startRace);
+function setPadState(button, key, active) {
+  if (state.status !== 'running' && active) {
+    return;
+  }
 
-canvas.addEventListener('pointerdown', (event) => {
+  state.controls[key] = active;
+  button.classList.toggle('is-active', active);
+}
+
+function attachHoldButton(button, key) {
+  button.addEventListener('pointerdown', (event) => {
+    button.setPointerCapture(event.pointerId);
+    setPadState(button, key, true);
+  });
+
+  const release = () => setPadState(button, key, false);
+  button.addEventListener('pointerup', release);
+  button.addEventListener('pointercancel', release);
+  button.addEventListener('pointerleave', release);
+}
+
+startButton.addEventListener('click', () => {
+  state.draftSettings = cloneSettings(state.draftSettings);
+  startRace();
+});
+
+restartButton.addEventListener('click', () => {
+  state.draftSettings = cloneSettings(state.settings);
+  startRace();
+});
+
+backToSetupButton.addEventListener('click', showSetup);
+pauseButton.addEventListener('click', openPause);
+resumeButton.addEventListener('click', resumeRace);
+applyRestartButton.addEventListener('click', () => {
+  state.draftSettings = cloneSettings(state.draftSettings);
+  startRace();
+});
+
+wheelControl.addEventListener('pointerdown', (event) => {
   if (state.status !== 'running') {
     return;
   }
 
-  state.pointer.active = true;
-  state.pointer.startX = event.clientX - stageFrame.getBoundingClientRect().left;
-  state.pointer.currentX = state.pointer.startX;
-  canvas.setPointerCapture(event.pointerId);
+  state.controls.wheel.active = true;
+  state.controls.wheel.pointerId = event.pointerId;
+  wheelControl.setPointerCapture(event.pointerId);
+  updateWheelFromPointer(event);
 });
 
-canvas.addEventListener('pointermove', (event) => {
-  if (!state.pointer.active) {
+wheelControl.addEventListener('pointermove', (event) => {
+  if (!state.controls.wheel.active || state.controls.wheel.pointerId !== event.pointerId) {
     return;
   }
 
-  updatePointer(event);
+  updateWheelFromPointer(event);
 });
 
-canvas.addEventListener('pointerup', (event) => {
-  state.pointer.active = false;
-  state.pointer.currentX = state.pointer.startX;
-  canvas.releasePointerCapture(event.pointerId);
+wheelControl.addEventListener('pointerup', (event) => {
+  if (state.controls.wheel.pointerId !== event.pointerId) {
+    return;
+  }
+
+  wheelControl.releasePointerCapture(event.pointerId);
+  state.controls.wheel.active = false;
+  state.controls.wheel.pointerId = null;
+  state.controls.wheel.angle = 0;
+  state.controls.wheel.steer = 0;
+  renderWheel();
 });
 
-canvas.addEventListener('pointercancel', () => {
-  state.pointer.active = false;
-  state.pointer.currentX = state.pointer.startX;
+wheelControl.addEventListener('pointercancel', () => {
+  state.controls.wheel.active = false;
+  state.controls.wheel.pointerId = null;
+  state.controls.wheel.angle = 0;
+  state.controls.wheel.steer = 0;
+  renderWheel();
 });
+
+attachHoldButton(brakeButton, 'brake');
+attachHoldButton(boostButton, 'boost');
+attachHoldButton(driftButton, 'drift');
 
 window.addEventListener('keydown', (event) => {
-  if (['ArrowLeft', 'ArrowRight', 'a', 'A', 'd', 'D', ' '].includes(event.key)) {
+  if (['ArrowLeft', 'ArrowRight', 'a', 'A', 'd', 'D', ' ', 'Shift', 'b', 'B', 'Escape'].includes(event.key)) {
     event.preventDefault();
   }
 
@@ -680,6 +1009,26 @@ window.addEventListener('keydown', (event) => {
 
   if (event.key === 'ArrowRight' || event.key === 'd' || event.key === 'D') {
     state.keyboard.right = true;
+  }
+
+  if (event.key === ' ') {
+    state.keyboard.brake = true;
+  }
+
+  if (event.key === 'Shift') {
+    state.keyboard.drift = true;
+  }
+
+  if (event.key === 'b' || event.key === 'B' || event.key === 'Enter') {
+    state.keyboard.boost = true;
+  }
+
+  if (event.key === 'Escape') {
+    if (state.status === 'running') {
+      openPause();
+    } else if (state.status === 'paused') {
+      resumeRace();
+    }
   }
 });
 
@@ -691,12 +1040,29 @@ window.addEventListener('keyup', (event) => {
   if (event.key === 'ArrowRight' || event.key === 'd' || event.key === 'D') {
     state.keyboard.right = false;
   }
+
+  if (event.key === ' ') {
+    state.keyboard.brake = false;
+  }
+
+  if (event.key === 'Shift') {
+    state.keyboard.drift = false;
+  }
+
+  if (event.key === 'b' || event.key === 'B' || event.key === 'Enter') {
+    state.keyboard.boost = false;
+  }
 });
 
 new ResizeObserver(resizeCanvas).observe(stageFrame);
 
+buildTrackSelectors();
+refreshStoredBest();
+renderSettingsPanels();
+renderWheel();
+renderBoostMeter();
 resizeCanvas();
-resetRaceCars();
+syncHudStatic();
 updateHud(performance.now());
-drawScene(performance.now());
+setStatus('ready');
 window.requestAnimationFrame(tick);
