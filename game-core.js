@@ -124,6 +124,10 @@ export function createTrack(width, height) {
   };
 }
 
+export function wrapProgress(progress) {
+  return ((progress % 1) + 1) % 1;
+}
+
 export function getTrackSample(track, point) {
   let bestSample = null;
 
@@ -150,6 +154,48 @@ export function getTrackSample(track, point) {
   return {
     ...bestSample,
     onTrack: bestSample.distance <= track.halfWidth,
+  };
+}
+
+export function getPointAtProgress(track, progress) {
+  const wrappedProgress = wrapProgress(progress);
+  const targetLength = wrappedProgress * track.totalLength;
+  let segmentIndex = 0;
+
+  while (
+    segmentIndex < track.segmentLengths.length - 1 &&
+    track.cumulativeLengths[segmentIndex + 1] < targetLength
+  ) {
+    segmentIndex += 1;
+  }
+
+  const start = track.points[segmentIndex];
+  const end = track.points[(segmentIndex + 1) % track.points.length];
+  const segmentStart = track.cumulativeLengths[segmentIndex];
+  const segmentLength = track.segmentLengths[segmentIndex] || 1;
+  const t = clamp((targetLength - segmentStart) / segmentLength, 0, 1);
+  const tangent = normalize(subtract(end, start));
+
+  return {
+    position: {
+      x: start.x + (end.x - start.x) * t,
+      y: start.y + (end.y - start.y) * t,
+    },
+    tangent,
+    normal: perpendicular(tangent),
+    segmentIndex,
+  };
+}
+
+export function createInitialLapState(totalLaps) {
+  return {
+    lap: 1,
+    totalLaps,
+    nextGate: 1,
+    completedLaps: 0,
+    bestLapMs: null,
+    lastLapMs: null,
+    finished: false,
   };
 }
 

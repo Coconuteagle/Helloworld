@@ -5,10 +5,13 @@ import {
   advanceLapState,
   createTrack,
   crossesGate,
+  createInitialLapState,
   formatLapTime,
+  getPointAtProgress,
   getTrackSample,
   normalizeSteeringInput,
   rankRaceEntries,
+  wrapProgress,
 } from '../game-core.js';
 
 test('crossesGate detects a movement segment passing through a checkpoint gate', () => {
@@ -88,4 +91,32 @@ test('formatLapTime renders a readable motorsport style timer', () => {
   assert.equal(formatLapTime(null), '--:--.--');
   assert.equal(formatLapTime(45210), '45.21');
   assert.equal(formatLapTime(123456), '2:03.45');
+});
+
+test('createInitialLapState starts on lap one and expects the first checkpoint', () => {
+  assert.deepEqual(createInitialLapState(3), {
+    lap: 1,
+    totalLaps: 3,
+    nextGate: 1,
+    completedLaps: 0,
+    bestLapMs: null,
+    lastLapMs: null,
+    finished: false,
+  });
+});
+
+test('getPointAtProgress returns a stable point along the loop and wraps over one full lap', () => {
+  const track = createTrack(1000, 700);
+  const start = getPointAtProgress(track, 0);
+  const wrapped = getPointAtProgress(track, 1);
+  const quarter = getPointAtProgress(track, 0.25);
+
+  assert.ok(Math.abs(start.position.x - wrapped.position.x) < 0.0001);
+  assert.ok(Math.abs(start.position.y - wrapped.position.y) < 0.0001);
+  assert.ok(Math.abs(quarter.tangent.x) + Math.abs(quarter.tangent.y) > 0.5);
+});
+
+test('wrapProgress keeps loop progress inside the 0 to 1 range', () => {
+  assert.equal(wrapProgress(1.25), 0.25);
+  assert.equal(wrapProgress(-0.2), 0.8);
 });
