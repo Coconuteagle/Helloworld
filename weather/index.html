@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>날씨 레이더</title>
+  <meta name="description" content="한국 도시명을 바로 검색할 수 있는 정적 날씨 앱" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <section class="hero-card">
+      <div class="hero-copy">
+        <p class="eyebrow">Static Weather App</p>
+        <h1>날씨 레이더</h1>
+        <p class="hero-text">도시명만 넣으면 현재 날씨랑 5일 예보를 바로 보여준다. 백엔드 없고 Open-Meteo + Nominatim만 쓴다.</p>
+      </div>
+
+      <form id="searchForm" class="search-form" autocomplete="off">
+        <label class="search-label" for="cityInput">도시 검색</label>
+        <div class="search-row">
+          <input id="cityInput" name="city" type="text" placeholder="예: 서울, 부산, 제주" aria-describedby="statusText" />
+          <button id="searchButton" type="submit">날씨 보기</button>
+        </div>
+        <div class="quick-cities" aria-label="빠른 도시 선택">
+          <button type="button" class="chip-button" data-city="서울">서울</button>
+          <button type="button" class="chip-button" data-city="부산">부산</button>
+          <button type="button" class="chip-button" data-city="대전">대전</button>
+          <button type="button" class="chip-button" data-city="광주">광주</button>
+          <button type="button" class="chip-button" data-city="제주">제주</button>
+        </div>
+      </form>
+
+      <p id="statusText" class="status" aria-live="polite">서울 날씨를 불러오는 중...</p>
+    </section>
+
+    <section class="dashboard">
+      <article class="current-card current-card--location">
+        <div class="card-header">
+          <p class="card-eyebrow">선택 위치</p>
+          <h2 id="locationName">-</h2>
+        </div>
+        <p id="locationMeta" class="location-meta">-</p>
+        <dl class="location-grid">
+          <div>
+            <dt>타임존</dt>
+            <dd id="timezoneValue">-</dd>
+          </div>
+          <div>
+            <dt>좌표</dt>
+            <dd id="coordValue">-</dd>
+          </div>
+        </dl>
+      </article>
+
+      <article class="current-card current-card--weather">
+        <div class="card-header">
+          <p class="card-eyebrow">현재 날씨</p>
+          <p id="updatedAt" class="updated-at">-</p>
+        </div>
+
+        <div class="temperature-row">
+          <div>
+            <p id="weatherSummary" class="weather-summary">-</p>
+            <strong id="currentTemp" class="current-temp">-</strong>
+          </div>
+          <div id="weatherEmoji" class="weather-emoji" aria-hidden="true">☀️</div>
+        </div>
+
+        <dl class="metric-grid">
+          <div>
+            <dt>체감</dt>
+            <dd id="feelsLikeValue">-</dd>
+          </div>
+          <div>
+            <dt>습도</dt>
+            <dd id="humidityValue">-</dd>
+          </div>
+          <div>
+            <dt>바람</dt>
+            <dd id="windValue">-</dd>
+          </div>
+        </dl>
+      </article>
+    </section>
+
+    <section class="forecast-section">
+      <div class="section-heading">
+        <div>
+          <p class="card-eyebrow">5일 예보</p>
+          <h2>하루씩 빠르게 보기</h2>
+        </div>
+        <p class="section-copy">최고/최저 기온이랑 강수 확률만 딱 보여준다.</p>
+      </div>
+      <div id="forecastGrid" class="forecast-grid" aria-live="polite"></div>
+    </section>
+
+    <footer class="app-footer">
+      <p>Data: Open-Meteo Forecast API · OpenStreetMap Nominatim</p>
+      <p>정적 배포라서 GitHub Pages에서 바로 열린다.</p>
+    </footer>
+  </main>
+
+  <script type="module" src="./app.mjs"></script>
+</body>
+</html>
